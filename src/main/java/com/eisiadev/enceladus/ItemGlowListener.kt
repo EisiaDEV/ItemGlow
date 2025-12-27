@@ -31,18 +31,40 @@ class ItemGlowListener(
         hologramManager.createHologram(item)
     }
 
-    @EventHandler(priority = EventPriority.MONITOR)
+    @EventHandler(priority = EventPriority.HIGHEST)
     fun onItemDespawn(event: ItemDespawnEvent) {
-        hologramManager.removeHologram(event.entity)
-        glowManager.removeGlowing(event.entity)
-        TeamManager.removeTeamForEntity(event.entity)
+        val item = event.entity
+        cleanupItem(item)
     }
 
-    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
     fun onItemPickup(event: EntityPickupItemEvent) {
         val item = event.item
-        hologramManager.removeHologram(item)
-        glowManager.removeGlowing(item)
-        TeamManager.removeTeamForEntity(item)
+        cleanupItem(item)
+        plugin.server.scheduler.runTask(plugin, Runnable {
+            if (item.isValid && !item.isDead) {
+                cleanupItem(item)
+            }
+        })
+    }
+
+    private fun cleanupItem(item: org.bukkit.entity.Item) {
+        try {
+            hologramManager.removeHologram(item)
+        } catch (e: Exception) {
+            plugin.logger.warning("Error removing hologram: ${e.message}")
+        }
+
+        try {
+            glowManager.removeGlowing(item)
+        } catch (e: Exception) {
+            plugin.logger.warning("Error removing glow: ${e.message}")
+        }
+
+        try {
+            TeamManager.removeTeamForEntity(item)
+        } catch (e: Exception) {
+            plugin.logger.warning("Error removing team: ${e.message}")
+        }
     }
 }
