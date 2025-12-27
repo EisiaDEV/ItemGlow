@@ -10,6 +10,7 @@ class ItemGlow : JavaPlugin() {
     }
 
     private lateinit var glowManager: GlowManager
+    private lateinit var hologramManager: HologramManager
 
     override fun onEnable() {
         instance = this
@@ -21,7 +22,8 @@ class ItemGlow : JavaPlugin() {
         }
 
         glowManager = GlowManager(this)
-        server.pluginManager.registerEvents(ItemGlowListener(this, glowManager), this)
+        hologramManager = HologramManager(this)
+        server.pluginManager.registerEvents(ItemGlowListener(this, glowManager, hologramManager), this)
 
         logger.info("ItemGlow Enabled.")
     }
@@ -29,6 +31,9 @@ class ItemGlow : JavaPlugin() {
     override fun onDisable() {
         if (::glowManager.isInitialized) {
             glowManager.cleanup()
+        }
+        if (::hologramManager.isInitialized) {
+            hologramManager.cleanup()
         }
         TeamManager.cleanup()
         logger.info("ItemGlow Disabled.")
