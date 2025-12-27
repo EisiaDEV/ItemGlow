@@ -1,0 +1,7 @@
+name: ItemGlow
+version: ${version}
+main: com.eisiadev.enceladus.ItemGlow
+api-version: 1.20
+author: eisiadev
+description: Makes dropped items glow with color based on itemname
+depend: [ProtocolLib]
