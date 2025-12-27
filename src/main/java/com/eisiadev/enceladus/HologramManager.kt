@@ -16,6 +16,7 @@ class HologramManager(private val plugin: ItemGlow) {
 
     private val holograms = ConcurrentHashMap<Int, TextDisplay>()
     private val hologramLocks = ConcurrentHashMap<Int, ReentrantLock>()
+    private val pendingRemovals = ConcurrentHashMap.newKeySet<Int>()
 
     fun createHologram(item: Item) {
         val entityId = item.entityId
@@ -58,6 +59,7 @@ class HologramManager(private val plugin: ItemGlow) {
                 val rightRotation = AxisAngle4f(0f, 0f, 0f, 1f)
                 display.transformation = Transformation(translation, leftRotation, scale, rightRotation)
             }
+
             item.addPassenger(textDisplay)
             holograms[entityId] = textDisplay
 
@@ -70,8 +72,18 @@ class HologramManager(private val plugin: ItemGlow) {
 
     fun removeHologram(item: Item) {
         val entityId = item.entityId
+
+        if (!pendingRemovals.add(entityId)) {
+            return
+        }
+
         val lock = hologramLocks.computeIfAbsent(entityId) { ReentrantLock() }
+
         if (!lock.tryLock()) {
+            plugin.server.scheduler.runTask(plugin, Runnable {
+                pendingRemovals.remove(entityId)
+                removeHologram(item)
+            })
             return
         }
 
@@ -79,31 +91,28 @@ class HologramManager(private val plugin: ItemGlow) {
             val textDisplay = holograms.remove(entityId)
 
             if (textDisplay != null) {
-                safeRemoveHologram(item, textDisplay)
+                if (item.isValid && item.passengers.contains(textDisplay)) {
+                    item.removePassenger(textDisplay)
+                }
+                plugin.server.scheduler.runTask(plugin, Runnable {
+                    try {
+                        if (textDisplay.isValid) {
+                            textDisplay.remove()
+                        }
+                    } catch (e: Exception) {
+                        plugin.logger.warning("Error removing hologram entity: ${e.message}")
+                    }
+                    pendingRemovals.remove(entityId)
+                })
+            } else {
+                pendingRemovals.remove(entityId)
             }
+        } catch (e: Exception) {
+            plugin.logger.warning("Error in removeHologram: ${e.message}")
+            pendingRemovals.remove(entityId)
         } finally {
             lock.unlock()
             hologramLocks.remove(entityId)
-        }
-    }
-
-    private fun safeRemoveHologram(item: Item, textDisplay: TextDisplay) {
-        try {
-            if (!textDisplay.isValid) {
-                return
-            }
-            if (item.isValid && item.passengers.contains(textDisplay)) {
-                item.removePassenger(textDisplay)
-            }
-            textDisplay.remove()
-
-        } catch (e: Exception) {
-            plugin.logger.warning("Error removing hologram: ${e.message}")
-            try {
-                if (textDisplay.isValid) {
-                    textDisplay.remove()
-                }
-            } catch (ignored: Exception) {}
         }
     }
 
@@ -112,32 +121,68 @@ class HologramManager(private val plugin: ItemGlow) {
             val toRemove = mutableListOf<Int>()
 
             holograms.forEach { (entityId, textDisplay) ->
+                var shouldRemove = false
                 if (!textDisplay.isValid) {
-                    toRemove.add(entityId)
-                    return@forEach
-                }
-                val hasValidItem = plugin.server.worlds.any { world ->
-                    world.entities.any { entity ->
-                        entity.entityId == entityId && entity is Item && entity.isValid
+                    shouldRemove = true
+                } else {
+                    val hasVehicle = textDisplay.vehicle != null
+                    if (!hasVehicle) {
+                        shouldRemove = true
+                        try {
+                            textDisplay.remove()
+                        } catch (ignored: Exception) {}
                     }
                 }
-                if (!hasValidItem) {
+
+                if (shouldRemove) {
+                    toRemove.add(entityId)
+                }
+            }
+
+            toRemove.forEach { entityId ->
+                holograms.remove(entityId)
+                hologramLocks.remove(entityId)
+                pendingRemovals.remove(entityId)
+            }
+
+            if (toRemove.isNotEmpty()) {
+                plugin.logger.fine("Fast cleanup: removed ${toRemove.size} holograms")
+            }
+
+        }, 4L, 4L) // 0.2초마다
+
+        plugin.server.scheduler.runTaskTimer(plugin, Runnable {
+            val toRemove = mutableListOf<Int>()
+
+            val validItemIds = plugin.server.worlds
+                .flatMap { it.entities }
+                .filterIsInstance<Item>()
+                .filter { it.isValid }
+                .map { it.entityId }
+                .toSet()
+
+            holograms.forEach { (entityId, textDisplay) ->
+                if (!textDisplay.isValid || entityId !in validItemIds) {
                     try {
-                        textDisplay.remove()
+                        if (textDisplay.isValid) {
+                            textDisplay.remove()
+                        }
                     } catch (ignored: Exception) {}
                     toRemove.add(entityId)
                 }
             }
+
             toRemove.forEach { entityId ->
                 holograms.remove(entityId)
                 hologramLocks.remove(entityId)
+                pendingRemovals.remove(entityId)
             }
 
             if (toRemove.isNotEmpty()) {
-                plugin.logger.info("Cleaned up ${toRemove.size} orphaned holograms")
+                plugin.logger.info("Deep cleanup: removed ${toRemove.size} orphaned holograms")
             }
 
-        }, 100L, 100L)
+        }, 100L, 100L) // 5초마다
     }
 
     fun cleanup() {
@@ -150,5 +195,6 @@ class HologramManager(private val plugin: ItemGlow) {
         }
         holograms.clear()
         hologramLocks.clear()
+        pendingRemovals.clear()
     }
 }
