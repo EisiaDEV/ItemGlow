@@ -28,38 +28,7 @@ class HologramManager(private val plugin: ItemGlow) {
                 return
             }
 
-            val itemStack = item.itemStack
-            val meta = itemStack.itemMeta ?: return
-
-            val displayName = if (meta.hasDisplayName()) {
-                meta.displayName()
-            } else {
-                Component.translatable(itemStack.translationKey())
-            }
-
-            val amount = itemStack.amount
-
-            val hologramText = displayName!!
-                .append(Component.text(" "))
-                .append(Component.text("x$amount", NamedTextColor.GOLD))
-                .decoration(TextDecoration.ITALIC, false)
-
-            val location = item.location.clone()
-            val textDisplay = item.world.spawn(location, TextDisplay::class.java) { display ->
-                display.text(hologramText)
-                display.isSeeThrough = false
-                display.isShadowed = true
-                display.alignment = TextDisplay.TextAlignment.CENTER
-                display.billboard = Display.Billboard.VERTICAL
-                display.backgroundColor = org.bukkit.Color.fromARGB(0, 0, 0, 0)
-
-                val scale = Vector3f(1.2f, 1.2f, 1.2f)
-                val leftRotation = AxisAngle4f(0f, 0f, 0f, 1f)
-                val translation = Vector3f(0f, 0.5f, 0f)
-                val rightRotation = AxisAngle4f(0f, 0f, 0f, 1f)
-                display.transformation = Transformation(translation, leftRotation, scale, rightRotation)
-            }
-
+            val textDisplay = createHologramDisplay(item) ?: return
             item.addPassenger(textDisplay)
             holograms[entityId] = textDisplay
 
@@ -67,6 +36,78 @@ class HologramManager(private val plugin: ItemGlow) {
             plugin.logger.warning("Failed to create hologram for item $entityId: ${e.message}")
         } finally {
             lock.unlock()
+        }
+    }
+
+    fun updateHologram(item: Item) {
+        val entityId = item.entityId
+        val lock = hologramLocks.computeIfAbsent(entityId) { ReentrantLock() }
+
+        lock.lock()
+        try {
+            val existingDisplay = holograms[entityId]
+
+            if (existingDisplay != null && existingDisplay.isValid) {
+                val itemStack = item.itemStack
+                val meta = itemStack.itemMeta ?: return
+
+                val displayName = if (meta.hasDisplayName()) {
+                    meta.displayName()
+                } else {
+                    Component.translatable(itemStack.translationKey())
+                }
+
+                val amount = itemStack.amount
+
+                val hologramText = displayName!!
+                    .append(Component.text(" "))
+                    .append(Component.text("x$amount", NamedTextColor.GOLD))
+                    .decoration(TextDecoration.ITALIC, false)
+
+                existingDisplay.text(hologramText)
+            } else {
+                holograms.remove(entityId)
+                createHologram(item)
+            }
+
+        } catch (e: Exception) {
+            plugin.logger.warning("Failed to update hologram for item $entityId: ${e.message}")
+        } finally {
+            lock.unlock()
+        }
+    }
+
+    private fun createHologramDisplay(item: Item): TextDisplay? {
+        val itemStack = item.itemStack
+        val meta = itemStack.itemMeta ?: return null
+
+        val displayName = if (meta.hasDisplayName()) {
+            meta.displayName()
+        } else {
+            Component.translatable(itemStack.translationKey())
+        }
+
+        val amount = itemStack.amount
+
+        val hologramText = displayName!!
+            .append(Component.text(" "))
+            .append(Component.text("x$amount", NamedTextColor.GOLD))
+            .decoration(TextDecoration.ITALIC, false)
+
+        val location = item.location.clone()
+        return item.world.spawn(location, TextDisplay::class.java) { display ->
+            display.text(hologramText)
+            display.isSeeThrough = false
+            display.isShadowed = true
+            display.alignment = TextDisplay.TextAlignment.CENTER
+            display.billboard = Display.Billboard.VERTICAL
+            display.backgroundColor = org.bukkit.Color.fromARGB(0, 0, 0, 0)
+
+            val scale = Vector3f(1.2f, 1.2f, 1.2f)
+            val leftRotation = AxisAngle4f(0f, 0f, 0f, 1f)
+            val translation = Vector3f(0f, 0.5f, 0f)
+            val rightRotation = AxisAngle4f(0f, 0f, 0f, 1f)
+            display.transformation = Transformation(translation, leftRotation, scale, rightRotation)
         }
     }
 
@@ -149,7 +190,7 @@ class HologramManager(private val plugin: ItemGlow) {
                 plugin.logger.fine("Fast cleanup: removed ${toRemove.size} holograms")
             }
 
-        }, 4L, 4L) // 0.2초마다
+        }, 4L, 4L)
 
         plugin.server.scheduler.runTaskTimer(plugin, Runnable {
             val toRemove = mutableListOf<Int>()
@@ -182,7 +223,7 @@ class HologramManager(private val plugin: ItemGlow) {
                 plugin.logger.info("Deep cleanup: removed ${toRemove.size} orphaned holograms")
             }
 
-        }, 100L, 100L) // 5초마다
+        }, 100L, 100L)
     }
 
     fun cleanup() {

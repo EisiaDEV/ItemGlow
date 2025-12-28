@@ -6,6 +6,8 @@ import org.bukkit.event.Listener
 import org.bukkit.event.entity.EntityPickupItemEvent
 import org.bukkit.event.entity.ItemDespawnEvent
 import org.bukkit.event.entity.ItemSpawnEvent
+import org.bukkit.event.entity.ItemMergeEvent
+import org.bukkit.event.world.ChunkUnloadEvent
 
 class ItemGlowListener(
     private val plugin: ItemGlow,
@@ -31,6 +33,20 @@ class ItemGlowListener(
         hologramManager.createHologram(item)
     }
 
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    fun onItemMerge(event: ItemMergeEvent) {
+        val target = event.target
+        val entity = event.entity
+
+        cleanupItem(entity)
+
+        plugin.server.scheduler.runTaskLater(plugin, Runnable {
+            if (target.isValid && !target.isDead) {
+                hologramManager.updateHologram(target)
+            }
+        }, 1L)
+    }
+
     @EventHandler(priority = EventPriority.HIGHEST)
     fun onItemDespawn(event: ItemDespawnEvent) {
         val item = event.entity
@@ -46,6 +62,19 @@ class ItemGlowListener(
                 cleanupItem(item)
             }
         })
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR)
+    fun onChunkUnload(event: ChunkUnloadEvent) {
+        val chunk = event.chunk
+
+        chunk.entities.forEach { entity ->
+            if (entity is org.bukkit.entity.Item) {
+                plugin.server.scheduler.runTask(plugin, Runnable {
+                    cleanupItem(entity)
+                })
+            }
+        }
     }
 
     private fun cleanupItem(item: org.bukkit.entity.Item) {
