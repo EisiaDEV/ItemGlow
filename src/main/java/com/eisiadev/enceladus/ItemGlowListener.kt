@@ -1,5 +1,6 @@
 package com.eisiadev.enceladus
 
+import org.bukkit.entity.Item
 import org.bukkit.event.EventHandler
 import org.bukkit.event.EventPriority
 import org.bukkit.event.Listener
@@ -7,6 +8,7 @@ import org.bukkit.event.entity.EntityPickupItemEvent
 import org.bukkit.event.entity.ItemDespawnEvent
 import org.bukkit.event.entity.ItemSpawnEvent
 import org.bukkit.event.entity.ItemMergeEvent
+import org.bukkit.event.world.ChunkLoadEvent
 import org.bukkit.event.world.ChunkUnloadEvent
 
 class ItemGlowListener(
@@ -18,19 +20,25 @@ class ItemGlowListener(
     @EventHandler(priority = EventPriority.NORMAL, ignoreCancelled = true)
     fun onItemSpawn(event: ItemSpawnEvent) {
         val item = event.entity
-        val itemStack = item.itemStack
-        val meta = itemStack.itemMeta ?: return
 
-        if (!meta.hasDisplayName()) return
+        // 다음 틱에 처리하여 아이템이 완전히 스폰되도록 함
+        plugin.server.scheduler.runTask(plugin, Runnable {
+            if (!item.isValid || item.isDead) return@Runnable
 
-        val displayName = meta.displayName()?.let { ColorExtractor.componentToString(it) } ?: return
-        val glowColor = ColorExtractor.extractColor(displayName)
+            val itemStack = item.itemStack
+            val meta = itemStack.itemMeta ?: return@Runnable
 
-        if (glowColor != null) {
-            glowManager.setGlowing(item, glowColor)
-        }
+            if (!meta.hasDisplayName()) return@Runnable
 
-        hologramManager.createHologram(item)
+            val displayName = meta.displayName()?.let { ColorExtractor.componentToString(it) } ?: return@Runnable
+            val glowColor = ColorExtractor.extractColor(displayName)
+
+            if (glowColor != null) {
+                glowManager.setGlowing(item, glowColor)
+            }
+
+            hologramManager.createHologram(item)
+        })
     }
 
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
@@ -68,16 +76,44 @@ class ItemGlowListener(
     fun onChunkUnload(event: ChunkUnloadEvent) {
         val chunk = event.chunk
 
-        chunk.entities.forEach { entity ->
-            if (entity is org.bukkit.entity.Item) {
-                plugin.server.scheduler.runTask(plugin, Runnable {
-                    cleanupItem(entity)
-                })
+        // 청크 언로드 시 해당 청크의 모든 아이템 정리
+        chunk.entities.filterIsInstance<Item>().forEach { item ->
+            try {
+                // 홀로그램만 제거하고 글로우는 유지 (재로드 시 복원용)
+                hologramManager.removeHologram(item)
+            } catch (e: Exception) {
+                plugin.logger.warning("Error removing hologram on chunk unload: ${e.message}")
             }
         }
     }
 
-    private fun cleanupItem(item: org.bukkit.entity.Item) {
+    @EventHandler(priority = EventPriority.MONITOR)
+    fun onChunkLoad(event: ChunkLoadEvent) {
+        val chunk = event.chunk
+
+        // 청크 로드 시 해당 청크의 아이템들을 다시 처리
+        plugin.server.scheduler.runTaskLater(plugin, Runnable {
+            chunk.entities.filterIsInstance<Item>().forEach { item ->
+                if (!item.isValid || item.isDead) return@forEach
+
+                val itemStack = item.itemStack
+                val meta = itemStack.itemMeta ?: return@forEach
+
+                if (!meta.hasDisplayName()) return@forEach
+
+                val displayName = meta.displayName()?.let { ColorExtractor.componentToString(it) } ?: return@forEach
+                val glowColor = ColorExtractor.extractColor(displayName)
+
+                // 글로우와 홀로그램 재생성
+                if (glowColor != null) {
+                    glowManager.setGlowing(item, glowColor)
+                }
+                hologramManager.createHologram(item)
+            }
+        }, 5L) // 청크가 완전히 로드될 때까지 약간 대기
+    }
+
+    private fun cleanupItem(item: Item) {
         try {
             hologramManager.removeHologram(item)
         } catch (e: Exception) {
