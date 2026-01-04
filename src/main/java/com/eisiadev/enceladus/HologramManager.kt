@@ -3,9 +3,11 @@ package com.eisiadev.enceladus
 import net.kyori.adventure.text.Component
 import net.kyori.adventure.text.format.NamedTextColor
 import net.kyori.adventure.text.format.TextDecoration
+import org.bukkit.NamespacedKey
 import org.bukkit.entity.Display
 import org.bukkit.entity.Item
 import org.bukkit.entity.TextDisplay
+import org.bukkit.persistence.PersistentDataType
 import org.bukkit.util.Transformation
 import org.joml.AxisAngle4f
 import org.joml.Vector3f
@@ -17,6 +19,8 @@ class HologramManager(private val plugin: ItemGlow) {
     private val holograms = ConcurrentHashMap<Int, TextDisplay>()
     private val hologramLocks = ConcurrentHashMap<Int, ReentrantLock>()
     private val pendingRemovals = ConcurrentHashMap.newKeySet<Int>()
+
+    private val hologramTag = NamespacedKey(plugin, "item_hologram")
 
     fun createHologram(item: Item) {
         val entityId = item.entityId
@@ -96,6 +100,12 @@ class HologramManager(private val plugin: ItemGlow) {
 
         val location = item.location.clone()
         return item.world.spawn(location, TextDisplay::class.java) { display ->
+            display.persistentDataContainer.set(
+                hologramTag,
+                PersistentDataType.BYTE,
+                1.toByte()
+            )
+
             display.text(hologramText)
             display.isSeeThrough = false
             display.isShadowed = true
@@ -226,6 +236,17 @@ class HologramManager(private val plugin: ItemGlow) {
         }, 100L, 100L)
     }
 
+    fun removeAllExistingHolograms() {
+        plugin.server.worlds.forEach { world ->
+            world.entities
+                .filterIsInstance<TextDisplay>()
+                .filter {
+                    it.persistentDataContainer.has(hologramTag, PersistentDataType.BYTE)
+                }
+                .forEach { it.remove() }
+        }
+    }
+
     fun cleanup() {
         holograms.values.forEach { textDisplay ->
             try {
@@ -238,4 +259,6 @@ class HologramManager(private val plugin: ItemGlow) {
         hologramLocks.clear()
         pendingRemovals.clear()
     }
+
+    fun getHologramTag(): NamespacedKey = hologramTag
 }

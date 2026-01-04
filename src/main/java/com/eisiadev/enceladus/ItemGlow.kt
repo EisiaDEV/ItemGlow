@@ -24,6 +24,8 @@ class ItemGlow : JavaPlugin() {
         glowManager = GlowManager(this)
         hologramManager = HologramManager(this)
         server.pluginManager.registerEvents(ItemGlowListener(this, glowManager, hologramManager), this)
+
+        hologramManager.removeAllExistingHolograms()
         hologramManager.startCleanupTask()
 
         logger.info("ItemGlow Enabled.")
